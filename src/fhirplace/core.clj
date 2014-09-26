@@ -96,7 +96,6 @@
 
 (defn strip-context  [h]
   (fn [{context :context uri :uri :as req}]
-    (println req)
     (if-not context
       (h req)
       (let [new-uri  (.substring uri  (.length context))]

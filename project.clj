@@ -50,6 +50,7 @@
                  [xpp3 "1.1.3.4.O"]
                  ;;[org.clojure/core.match  "0.2.1"]
                  [environ  "0.5.0"]
+                 [hiccup "1.0.5"]
                  ]
 
   :profiles {:dev {:source-paths ["dev"]

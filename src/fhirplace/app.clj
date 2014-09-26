@@ -11,6 +11,7 @@
             [fhirplace.db :as db]
             [ring.adapter.jetty :as jetty]
             [clojure.data.json :as json]
+            [hiccup.page :refer (html5 include-css include-js)]
             [environ.core :as env]))
 
 (import 'org.hl7.fhir.instance.model.Resource)
@@ -47,25 +48,34 @@
   (let [mime (if (and (instance? AtomFeed bd) (= :xml fmt))
                "application/atom+xml"
                (get {:json "application/json+fhir"
-                    :xml "application/xml+fhir"} fmt))]
-       (str mime "; charset=UTF-8")))
+                     :xml "application/xml+fhir"} fmt))]
+    (str mime "; charset=UTF-8")))
 
 (defn- responce-content-type
   [resp fmt body]
   (update-in resp [:headers] merge {"content-type" (content-type-format fmt body)}))
 
+
+
+
+(defn- serializable? [bd]
+  (and bd
+       (or (instance? Resource bd)
+           (instance? AtomFeed bd))))
+
+;; TODO set right headers
 (defn <-format [h]
   "formatting midle-ware
   expected body is instance of fhir reference impl"
   (fn [req]
     (let [{bd :body :as resp} (h req)
           fmt (determine-format req)]
-      ;; TODO set right headers
       (println "Formating: " bd)
-      (responce-content-type
-       (if (and bd (or (instance? Resource bd) (instance? AtomFeed bd)))
-         (assoc resp :body (f/serialize fmt bd))
-         resp) fmt bd))))
+      (->
+        (if (serializable? bd)
+          (assoc resp :body (f/serialize fmt bd))
+          resp)
+        (responce-content-type fmt bd)))))
 
 (defn- cors-options
   [req]
@@ -88,7 +98,7 @@
 (defn- allowed-origin
   "May check if allow CORS access here"
   [req]
-   (get-in req [:headers "origin"]))
+  (get-in req [:headers "origin"]))
 
 (defn <-cors [h]
   "Cross-origin resource sharing midle-ware"
@@ -218,18 +228,62 @@
   #"[0-f]{8}-([0-f]{4}-){3}[0-f]{12}")
 
 (defn =metadata [req]
-  {:body (f/conformance)})
+  {:body (db/-conformance)})
 
 (defn =profile [{{tp :type} :params :as req}]
-  {:body (f/profile-resource tp)})
+  {:body (db/-profile tp)})
+
+(defn html-layout [content]
+  (html5
+    {:lang "en"}
+    [:head
+     [:title "fhirbase"]
+     (include-css "//netdna.bootstrapcdn.com/twitter-bootstrap/2.3.1/css/bootstrap-combined.min.css")
+     (include-css "//maxcdn.bootstrapcdn.com/font-awesome/4.2.0/css/font-awesome.min.css")
+     (include-css "/face.css")
+     [:body
+      [:div.wrap content]
+      (include-js "/face.js")
+      ]]))
+
+(defn html-face [req]
+  (-> (response
+        (html-layout
+          [:div
+           [:h1.top
+            [:span {:class "icon logo"}  "L"]
+            "fhirplace "
+            ]
+           [:div.ann
+            [:a {:href "https://github.com/fhirbase/fhirplace"} "Open Source " [:big.fa.fa-github]]
+            " FHIR server backed by "
+            [:a {:href "https://github.com/fhirbase/fhirbase"} "fhirbase"]]
+           [:div.bot
+            [:h2 "Applications:"]
+            [:hr]
+            [:h4
+             [:a {:href "/fhirface/index.html"}
+              [:big.fa.fa-star]
+              " fhirface"]
+             [:small "  generic fhir client"]]
+            [:hr]
+            [:h4
+             [:a {:href "/regi/index.html"}
+              [:big.fa.fa-star]
+              " regi"]
+             [:small "  sample application"]]]
+           ]))
+      (content-type "text/html; charset=UTF-8")
+      (status 200)))
 
 (defn =search-all [req]
-  (throw (Exception. "search-all not implemented")))
+  #_(throw (Exception. "search-all not implemented"))
+  (html-face req))
 
 (defn =search [{{rt :type :as param} :params :as req}]
   (println "QUERY-STRING: " (:query-string req))
   (let [query (or (:query-string req) "")]
-   {:body (db/-search rt query)}))
+    {:body (db/-search rt query)}))
 
 (defn =tags-all [_]
   {:body (db/-tags)})
@@ -300,8 +354,8 @@
     (if (= rt resource-type)
       (let [item (db/-create resource-type json jtags)]
         (-> (resource-resp item)
-           (status 201)
-           (header "Category" (fc/encode-tags tags))))
+            (status 201)
+            (header "Category" (fc/encode-tags tags))))
       (throw (Exception. (str "Wrong resource type '" resource-type "' for '" rt "' endpoint"))))))
 
 (defn =update

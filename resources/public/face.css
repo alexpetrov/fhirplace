@@ -1,0 +1,55 @@
+html, body {
+  padding:0;
+  font-size: 18px;
+}
+
+
+.top {
+  margin: 0;
+  padding: 150px 50px 50px;
+  font-size: 60px;
+  background: #3686be;
+  color: white;
+  text-align: center;
+  /* border-bottom: 5px solid black; */
+}
+.ann {
+  background-color: #2b74a7;
+  font-weight: 800;
+  padding: 25px 0;
+  font-size: 20px;
+  text-align: center;
+  color: white;
+}
+.ann a {
+  color: white;
+  border-bottom: 1px dotted #ffffff;
+}
+.ann a:hover {
+  text-decoration: none;
+  border-bottom: 1px solid #ffffff;
+}
+.top .fa {
+  color: white;
+}
+.bot {
+  box-shadow: 2px black;
+  padding: 20px;
+  margin: 10px auto;
+  width: 20em;
+}
+@font-face {
+  font-family: 'LogosFont';
+  src: url('/LogosFont.ttf');
+  font-weight: normal;
+  font-style: normal;
+}
+.icon {
+  display: inline-block;
+  font-family: LogosFont ;
+  font-style: normal;
+  font-weight: normal;
+  line-height: 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

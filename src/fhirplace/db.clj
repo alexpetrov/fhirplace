@@ -18,7 +18,21 @@
 
 
 (defn cfg []
-  {:base (env/env :fhirplace-web-url)})
+  {:base (env/env :fhirplace-web-url)
+   :identifier "http://fhirplace.org"
+   :version :todo
+   :description "FHIR open source server"
+   :name "fhirplace"
+   :publisher "fhirplace"
+   :date "2014-08-30"
+   :software {:name "fhirplace"
+              :version "0.0.1" }
+   :telecom [{:system "url" :value "http://try-fhirplace.hospital-systems.com/fhirface/index.html#/" }]
+   :acceptUnknown false
+   :fhirVersion "integration build"
+   :format ["json" "xml"]
+   :cors true
+   })
 
 (defn cfg-str []
   (json/write-str (cfg)))
@@ -134,6 +148,14 @@
     nil?
     not))
 
+(defn -conformance []
+  (f/parse
+    (call* :fhir_conformance (cfg-str))))
+
+(defn -profile [tp]
+  (f/parse
+    (call* :fhir_profile (cfg-str) tp)))
+
 (defn -search [tp q]
   (f/parse
     (call* :fhir_search (cfg-str) tp q)))
@@ -167,6 +189,3 @@
 (defn -remove-tags
   ([tp id] (call* :fhir_remove_tags tp id))
   ([tp id vid] (call* :fhir_remove_tags tp id vid)))
-
-#_(-history "Patient" (uuid))
-#_(-history "Encounter" (uuid))

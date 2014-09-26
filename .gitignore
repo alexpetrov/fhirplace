@@ -19,6 +19,8 @@ gui/.tmp
 gui/app/bower_components
 gui/dist
 gui/node_modules
-resources/public
+resources/public/fhirface
+resources/public/regi
+resources/public/apps
 gui/lib/
 .lein-env

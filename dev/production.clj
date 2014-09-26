@@ -1,6 +1,4 @@
-(ns production
-  (:require [immutant.web :as web]
-            [fhirplace.core :as fcore]))
+(ns user
+  (:require [fhirplace.core :as fc]))
 
-(defn init []
-  (web/start "/" fcore/app))
+(def srv (fc/start-server))
