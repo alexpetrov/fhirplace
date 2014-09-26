@@ -18,7 +18,7 @@
 
    (is (> 0 (count (.getEntryList (db/-search "Patient" {:name "Pete" :_sort ["name"]})))))
 
-   (db/-update "Patient" (:logical_id pt) (fixture "patient.json") "[]")
+   (db/-update "Patient" (:logical_id pt) (ft/fixture "patient.json") "[]")
    (db/-delete "Patient" (:logical_id pt))
    ))
 
