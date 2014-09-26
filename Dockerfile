@@ -21,6 +21,9 @@ RUN sudo apt-get install -qq -y tmux zsh
 RUN cd ~/ && git clone https://github.com/niquola/dotfiles
 RUN cd ~/dotfiles && bash install.sh
 
+sudo apt-get install emacs24
+git clone https://github.com/flyingmachine/emacs-for-clojure.git ~/.emacs.d
+
 RUN cd ~/ && git clone https://github.com/fhirbase/fhirplace.git
 RUN cd ~/fhirplace && git pull origin master && echo 'v0.0.0'
 RUN cd ~/fhirplace && git submodule init && git submodule update

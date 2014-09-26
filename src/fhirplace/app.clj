@@ -366,8 +366,7 @@
         resource-type (str (.getResourceType res))]
     (if (= rt resource-type)
       (let [cl (get-in req [:headers "content-location"])
-            vid (last (cs/split cl #"/"))
-            item (db/-update rt id vid json jtags)]
+            item (db/-update rt id cl json jtags)]
         (-> (resource-resp item)
             (status 200)))
       (throw (Exception. (str "Wrong resource type '" resource-type "' for '" rt "' endpoint"))))))
@@ -402,7 +401,7 @@
         (status 200))))
 
 (defn =vread [{{rt :type id :id vid :vid} :params}]
-  (let [res (db/-vread rt id vid)]
+  (let [res (db/-vread rt (str id "/_history/" vid))]
     (println res)
     (-> (resource-resp res)
         (status 200))))

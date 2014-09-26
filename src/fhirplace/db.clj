@@ -135,8 +135,8 @@
 (defn -read [tp id]
   (call* :fhir_read (cfg-str) tp id))
 
-(defn -vread [tp id vid]
-  (call* :fhir_vread (cfg-str) tp id vid))
+(defn -vread [tp vid]
+  (call* :fhir_vread (cfg-str) tp vid))
 
 (defn -resource-exists? [tp id]
   (->
