@@ -1,28 +1,20 @@
 (defproject fhirplace "0.1.0-SNAPSHOT"
-  :description "FIXME: write description"
-  :url "http://example.com/FIXME"
+  :description "FHIR server backed by fhirbase"
+  :url "https://github.com/fhirbase/fhirplace"
 
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
 
-  ;; :ring {:handler fhirplace.app/app}
-
-  :plugins [[lein-ring "0.8.10"]
-            [lein-midje "3.0.0"]
-            [lein-immutant "1.2.1"]]
+  :plugins [[com.jakemccrary/lein-test-refresh "0.5.2"] ]
 
   :source-paths  ["lib/route-map/test"
                   "lib/route-map/src"
                   "src"]
 
-  :resource-paths ["resources"]
+  :resource-paths    ["resources"]
   :java-source-paths ["java"]
 
-  ; org.hl7.fhir.convertors/
-  ; org.hl7.fhir.sentinel/
-
   :ring {:handler fhirplace.core/app}
-  :immutant {:init production/init}
 
   :dependencies [[org.clojure/clojure "1.5.1"]
 
@@ -55,13 +47,7 @@
 
   :profiles {:dev {:source-paths ["dev"]
                    :dependencies [[org.clojure/tools.namespace "0.2.4"]
-                                  [com.cemerick/pomegranate "0.2.0"]
                                   [midje "1.6.0"]
-                                  [org.clojure/test.check  "0.5.7"]
-                                  [im.chit/vinyasa "0.1.8"]
-                                  [io.aviso/pretty "0.1.10"]
-                                  [spyscope "0.1.3"]
-                                  [criterium "0.4.1"]
                                   [leiningen "2.3.4"]
                                   [org.clojure/java.classpath "0.2.0"]]
                    :plugins [[lein-kibit "0.0.8"]] }})

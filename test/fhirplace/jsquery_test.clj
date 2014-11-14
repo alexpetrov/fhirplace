@@ -1,47 +1,39 @@
 (ns fhirplace.jsquery-test
-  (:use midje.sweet)
   (:require
+    [clojure.test :refer :all]
     [fhirplace.jsquery :as fj]))
 
-(fact "jsquery"
-  (fj/jsquery "confirmed") => "\"confirmed\""
-  (fj/jsquery 1) => 1
+(defn query-match? [x y]
+  (is (= (fj/jsquery x) y)))
 
-  (fj/jsquery
-    [:= "status" "confirmed"])
-  => "\"status\" = \"confirmed\""
+(deftest jsquery-test
+  (query-match? "confirmed" "\"confirmed\"")
 
-  (fj/jsquery
-    [:= "status" 1])
-  => "\"status\" = 1"
+  (query-match? 1 1)
 
+  (query-match?  [:= "status" "confirmed"] "\"status\" = \"confirmed\"")
 
-  (fj/jsquery
-    [:&
-     [:= "system" 2]
-     [:= "code" 3]])
-  => "\"system\" = 2 & \"code\" = 3"
+  (query-match?  [:= "status" 1] "\"status\" = 1")
 
-  (fj/jsquery
-    [:|
-     [:= "system" 2]
-     [:= "code" 3]])
-  => "\"system\" = 2 | \"code\" = 3"
+  (query-match?
+    [:& [:= "system" 2] [:= "code" 3]]
+    "\"system\" = 2 & \"code\" = 3")
 
-  (fj/jsquery
-    [:|
-     [:= "system" 2]
-     [:= "code" 3]])
-  => "\"system\" = 2 | \"code\" = 3"
+  (query-match?
+    [:| [:= "system" 2] [:= "code" 3]]
+    "\"system\" = 2 | \"code\" = 3")
 
-  (fj/jsquery
+  (query-match?
+    [:| [:= "system" 2] [:= "code" 3]]
+    "\"system\" = 2 | \"code\" = 3")
+  (query-match?
     ["category.coding.#"
      [:&
       [:= "system" 2]
-      [:= "code" 3]]])
-  => "\"category\".\"coding\".# ( \"system\" = 2 & \"code\" = 3 )"
+      [:= "code" 3]]]
+    "\"category\".\"coding\".# ( \"system\" = 2 & \"code\" = 3 )")
 
-  (fj/jsquery
+  (query-match?
     [:&
      [:= "status" "confirmed"]
      ["category.coding.#"
@@ -51,8 +43,8 @@
      ["code.coding.#"
       [:&
        [:= "system" 2]
-       [:= "code" 3]]]])
-  =>
-  "\"status\" = \"confirmed\" & \"category\".\"coding\".# ( \"system\" = 2 & \"code\" = 3 ) & \"code\".\"coding\".# ( \"system\" = 2 & \"code\" = 3 )"
+       [:= "code" 3]]]]
+
+    "\"status\" = \"confirmed\" & \"category\".\"coding\".# ( \"system\" = 2 & \"code\" = 3 ) & \"code\".\"coding\".# ( \"system\" = 2 & \"code\" = 3 )")
   )
 

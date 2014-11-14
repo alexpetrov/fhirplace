@@ -6,16 +6,28 @@
     [fhir.bundle :as fb]
     [fhir.profiles :as fp]))
 
+(import 'org.hl7.fhir.instance.model.Resource)
+(import 'org.hl7.fhir.instance.model.AtomFeed)
+
+
 (def re-xml #"(?m)^<.*>")
 (def re-json #"(?m)^[{].*")
 
-(defn parse [x]
-  "parse xml or json string
-  throw error"
+(defn parse
+  "parse xml or json string,if not throws error"
+  [x]
   (cond
     (re-seq re-xml x) (fc/from-xml x)
     (re-seq re-json x) (fc/from-json x)
     :else (throw (Exception. "Don't know how to parse: " (pr-str x)))))
+
+(defn atom? [res]
+   (instance? AtomFeed res))
+
+(defn serializable? [x]
+  (and x
+       (or (instance? Resource x)
+           (instance? AtomFeed x))))
 
 (defn serialize [fmt x]
   (cond
@@ -28,19 +40,21 @@
 (defn conformance []
   fp/conformance)
 
-(defn profile [res-type]
+(defn profile
   "return clojure representation of resource profile"
+  [res-type]
   (cc/parse-string
     (serialize :json
                (.getResource
                  (fp/profile res-type)))
     true))
 
-(defn profile-resource [res-type]
+(defn profile-resource
   "return fhir representation of resource profile"
+  [res-type]
   (fp/profile-resource res-type))
 
-(defn bundle [attrs]
-  "build bundle from hash-map
-  with entry :content parsed to fhir.model.Resource"
+(defn bundle
+  "build bundle from hash-map with entry :content parsed to fhir.model.Resource"
+  [attrs]
   (fb/bundle attrs))

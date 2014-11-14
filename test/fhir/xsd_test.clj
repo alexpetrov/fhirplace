@@ -1,15 +1,18 @@
 (ns fhir.xsd-test
-  (:use midje.sweet)
-  (:require [fhir.xsd :as fx]))
+  (:require
+    [clojure.test :refer :all]
+    [fhir.xsd :as fx]))
 
 
 (def pt-validator
   (fx/mk-validator "fhir/patient.xsd"))
 
-(fact
-  (pt-validator
-    (slurp "test/fixtures/patient.xml")) => nil
+(deftest xsd-test
+  (is
+    (nil? (pt-validator
+            (slurp "test/fixtures/patient.xml"))))
 
-  (pt-validator
-    (slurp "test/fixtures/invalid-patient.xml"))
-  => (contains "org.xml.sax.SAXParseException"))
+  (is
+    (re-find #"org.xml.sax.SAXParseException"
+                (pt-validator
+                  (slurp "test/fixtures/invalid-patient.xml")))))

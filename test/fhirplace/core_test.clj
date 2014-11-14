@@ -1,18 +1,31 @@
 (ns fhirplace.core-test
-  (:use midje.sweet)
-  (:require [fhirplace.core :as fc]))
+  (:require
+    [clojure.test :refer :all]
+    [fhirplace.core :as fc]))
 
-(defn mw1 [h]
-  (fn [r]
-    (h (merge r {:a 1 :last 1}))))
+(defn mk-mw [msg]
+  (fn [h]
+    (fn [r]
+      (h (conj r msg)))))
 
-(defn mw2 [h]
-  (fn [r]
-    (h (merge r {:b 2 :last 2} ))))
+(deftest test-build-stack
+  (let [st (fc/build-stack
+             (fn [req] (conj req "handler"))
+             [(mk-mw "inter-1")
+              (mk-mw "inter-2")
+              (mk-mw "inter-3")])]
 
-(fact
-  "Build stack wrap all midlewares"
-  ((fc/build-stack
-     identity
-     [mw1 mw2]) {}) => {:a 1 :b 2 :last 2})
+    (is (= (st [])
+           ["inter-1" "inter-2" "inter-3" "handler"]))))
 
+(deftest test-get-cfg
+  (is
+    (= (fc/base-url {:scheme :http
+                     :server-name "hostic"
+                     :server-port 3000})
+       "http://hostic:3000"))
+
+  (= (fc/base-url {:scheme :https
+                   :server-name "hostic"
+                   :server-port 80})
+     "https://hostic"))

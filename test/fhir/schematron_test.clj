@@ -1,6 +1,6 @@
 (ns fhir.schematron-test
-  (:use midje.sweet)
   (:require
+    [clojure.test :refer :all]
     [fhir.schematron :as s]
     [clojure.java.io :as io]
     [saxon :as xml]))
@@ -8,10 +8,12 @@
 (def pt-sch
   (s/compile-sch "fhir/patient.sch"))
 
-(facts
-  (pt-sch
-    (slurp "test/fixtures/patient.xml")) => nil
+(deftest schematron-test
+  (is
+    (nil? (pt-sch (slurp "test/fixtures/patient.xml"))))
 
-  (pt-sch
-    (slurp "test/fixtures/patient-invalid-schematron.xml"))
-  => (one-of map?))
+
+  (is
+    (map?
+      (first (pt-sch
+               (slurp "test/fixtures/patient-invalid-schematron.xml"))))))

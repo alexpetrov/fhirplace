@@ -1,335 +1,217 @@
 (ns fhirplace.app
-  (:use ring.util.response
-        ring.util.request)
-  (:require [compojure.core :as cc]
-            [compojure.route :as cr]
-            [compojure.handler :as ch]
+  (:require [ring.util.response :as rur]
             [clojure.string :as cs]
             [fhir :as f]
+            [fhirplace.pg :as fp]
+            [fhirplace.plugins :as fpl]
             [fhirplace.category :as fc]
+            [fhirplace.views :as fv]
+            [hiccup.core :as hc]
             [fhir.operation-outcome :as fo]
-            [fhirplace.db :as db]
-            [ring.adapter.jetty :as jetty]
-            [clojure.data.json :as json]
-            [hiccup.page :refer (html5 include-css include-js)]
-            [environ.core :as env]))
+            [clojure.stacktrace :as cst]
+            [clojure.data.json :as json]))
 
-(import 'org.hl7.fhir.instance.model.Resource)
-(import 'org.hl7.fhir.instance.model.AtomFeed)
-
-(defn url [& parts]
-  (str
-    (env/env :fhirplace-web-url)
-    "/"
-    (apply str (interpose "/" parts))))
-
-(defn- request-format
-  [req]
-  (if-let [ct (get-in req [:headers "content-type"])]
-    (if-let [mime (first (cs/split ct #"\;"))]
-      ({"application/json+fhir" :json "application/xml+fhir" :xml} mime))))
-
-(defn- determine-format
-  "Determines request format (:xml or :json)."
-  [{{fmt :_format} :params :as req}]
-  (or (get {"json" :json
-            "application/json" :json
-            "application/json+fhir" :json
-            "xml" :xml
-            "text/xml" :xml
-            "application/xml" :xml
-            "application/atom+xml" :xml
-            "application/xml+fhir" :xml} fmt)
-      (request-format req)
-      :json))
-
-(defn- content-type-format
-  [fmt bd]
-  (let [mime (if (and (instance? AtomFeed bd) (= :xml fmt))
-               "application/atom+xml"
-               (get {:json "application/json+fhir"
-                     :xml "application/xml+fhir"} fmt))]
-    (str mime "; charset=UTF-8")))
-
-(defn- responce-content-type
-  [resp fmt body]
-  (update-in resp [:headers] merge {"content-type" (content-type-format fmt body)}))
-
-
-
-
-(defn- serializable? [bd]
-  (and bd
-       (or (instance? Resource bd)
-           (instance? AtomFeed bd))))
-
-;; TODO set right headers
-(defn <-format [h]
-  "formatting midle-ware
-  expected body is instance of fhir reference impl"
-  (fn [req]
-    (let [{bd :body :as resp} (h req)
-          fmt (determine-format req)]
-      (println "Formating: " bd)
-      (->
-        (if (serializable? bd)
-          (assoc resp :body (f/serialize fmt bd))
-          resp)
-        (responce-content-type fmt bd)))))
-
-(defn- cors-options
-  [req]
-  (if (= :options (:request-method req))
-    (do
-      (println "CORS OPTIONS")
-      (let [headers (get-in req [:headers "access-control-request-headers"])
-            method (get-in req [:headers "access-control-request-method"])]
-        (println "Request-Headers:" headers "Request-Method" methods)
-        {:status 200
-         :body "preflight complete"
-         :headers {"Access-Control-Allow-Headers" headers
-                   "Access-Control-Allow-Methods" method}}))))
-
-(defn- acao
-  [resp origin]
-  (update-in resp [:headers] merge {"Access-Control-Allow-Origin" origin
-                                    "Access-Control-Expose-Headers" "Location, Content-Location, Category, Content-Type"}))
-
-(defn- allowed-origin
-  "May check if allow CORS access here"
-  [req]
-  (get-in req [:headers "origin"]))
-
-(defn <-cors [h]
-  "Cross-origin resource sharing midle-ware"
-  (fn [req]
-    (if-let [origin (allowed-origin req)]
-      (do
-        (println "CORS Origin: " origin)
-        (acao (or (cors-options req) (h req)) origin))
-      (h req))))
-
+;; TODO merge db here
 (defn- get-stack-trace [e]
-  (let [sw (java.io.StringWriter.)]
-    (.printStackTrace e (java.io.PrintWriter. sw))
-    (println "ERROR: " sw)
-    (str sw)))
+  (with-out-str (cst/print-stack-trace e)))
 
-(defn- outcome [status text & issues]
-  {:status status
-   :body (fo/operation-outcome
-           {:text {:status "generated" :div (str "<div>" text "</div>")}
-            :issue issues })})
+(defn cfg  [x]
+  (merge x
+         {:identifier "http://fhirplace.org"
+          :version :todo
+          :description "FHIR open source server"
+          :name "fhirplace"
+          :publisher "fhirplace"
+          :date "2014-08-30"
+          :software  {:name "fhirplace"
+                      :version "0.0.1" }
+          :telecom  [{:system "url" :value "http://try-fhirplace.hospital-systems.com/fhirface/index.html#/" }]
+          :acceptUnknown false
+          :fhirVersion "integration build"
+          :format  ["json" "xml"]
+          :cors true
+          }))
 
-(defn <-outcome-on-exception [h]
-  (fn [req]
-    (println "<-outcome-on-exception")
-    (try
-      (h req)
-      (catch Exception e
-        (println "Exception")
-        (println (get-stack-trace e))
-        (outcome 500 "Server error"
-                 {:severity "fatal"
-                  :details (str "Unexpected server error " (get-stack-trace e))})))))
+(defn cfg-str  [x] (json/write-str  (cfg x)))
+
+(def outcomes
+  {:server-error         500
+   :type-not-supported   404
+   :resource-not-exists  404
+   :resource-not-parsed  400
+   :resource-not-valid   422
+   :resource-deleted     410
+   :not-last-version     412
+   :no-version-info      401
+   :no-tags              422})
+
+(defmacro  defmw [nm h prms & body]
+  `(defn ~(symbol nm) [h#]
+     (let [~h h#]
+       (fn ~prms
+         (println "MW: " ~(name nm))
+         ~@body))))
+
+(defn- outcome [error-key text & issues]
+  (println "ERROR[" error-key "]" text)
+  (let [status (get outcomes error-key)
+        issues (or issues [{:severity "fatal" :details text}])]
+    {:status status
+     :body (fo/operation-outcome
+             {:text {:status "generated"
+                     :div (str "<div>" text "</div>")}
+              :issue issues})}))
+
+(defmw <-outcome-on-exception h [req]
+  (try (h req)
+       (catch Exception e
+         (println "EXEPTION:" (get-stack-trace e))
+         (outcome :server-error
+                  (str "Unexpected server error " (hc/h (get-stack-trace e)))))))
 
 
-(defn ->type-supported! [h]
-  (fn [{{tp :type} :params :as req}]
-    (println "TODO: ->type-supported!")
-    (if tp
-      (h req)
-      (outcome 404 "Resource type not supported"
-               {:severity "fatal"
-                :details (str "Resource type [" tp "] isn't supported")}))))
+(defmw ->type-supported! h
+  [{{tp :type} :params :as req}]
+  (if tp
+    (h req)
+    (outcome :type-not-supported
+             (str "Resource type [" tp "] isn't supported"))))
 
-(defn ->resource-exists! [h]
-  (fn [{{tp :type id :id } :params :as req}]
-    (println "->resource-exists!")
-    (if (db/-resource-exists? tp id)
-      (h req)
-      (outcome 404 "Resource not exists"
-               {:severity "fatal"
-                :details (str "Resource with id: " id " not exists")}))))
+(defmw ->resource-exists! h
+  [{{tp :type id :id } :params cfg :cfg :as req}]
+  (if (fp/call* :fhir_is_resource_exists (cfg-str cfg) tp id)
+    (h req)
+    (outcome :resource-not-exists
+             (str "Resource with id: " id " not exists"))))
 
-;; TODO: move to fhir f/errors could do it
 (defn- safe-parse [x]
   (try
     [:ok (f/parse x)]
     (catch Exception e
       [:error (str "Resource could not be parsed: \n" x "\n" e)])))
 
-(defn ->parse-tags!
-  "parse body and put result as :data"
-  [h]
-  (fn [req]
-    (println "->parse-tags!")
-    (if-let [c (get-in req [:headers "category"])]
-      (h (assoc req :tags (fc/safe-parse c)))
-      (h (assoc req :tags [])))))
+;; "parse body and put result as :data"
+(defmw ->parse-body! h
+  [{bd :body :as req}]
+  (let [[st res] (safe-parse (slurp bd)) ]
+    (if (= st :ok)
+      (h (assoc req :data res))
+      (outcome :resource-not-parsed res))))
 
-(defn ->parse-body!
-  "parse body and put result as :data"
-  [h]
-  (fn [{bd :body :as req}]
-    (println "->parse-body!")
-    (let [[st res] (safe-parse (slurp bd)) ]
-      (if (= st :ok)
-        (h (assoc req :data res))
-        (outcome 400 "Resource could not be parsed"
-                 {:severity "fatal"
-                  :details res})))))
-
-(defn ->valid-input! [h]
-  "validate :data key for errors"
-  (fn [{res :data :as req}]
-    (println "->valid-input!")
-    (let [errors (f/errors res)]
-      (if (empty? errors)
-        (h (assoc req :data res))
-        (apply outcome 422
+;"validate :data key for errors"
+(defmw ->valid-input! h
+  [{res :data :as req}]
+  (let [errors (f/errors res)]
+    (if (empty? errors)
+      (h (assoc req :data res))
+      (outcome :resource-not-valid
                "Resource Unprocessable Entity"
-               (map
-                 (fn [e] {:severity "fatal"
-                          :details (str e)})
-                 errors))))))
+               (map #({:severity "fatal" :details (str %)}) errors)))))
 
-(defn ->check-deleted! [h]
-  (fn [{{tp :type id :id} :params :as req}]
-    (println "->check-deleted!")
-    (if (db/-deleted? tp id)
-      (outcome 410 "Resource was deleted"
-               {:severity "fatal"
-                :details (str "Resource " tp " with " id " was deleted")})
-      (h req))))
+(defmw ->check-deleted! h
+  [{{tp :type id :id} :params cfg :cfg :as req}]
+  (if (fp/call* :fhir_is_deleted_resource (cfg-str cfg) tp id)
+    (outcome :resource-deleted (str "Resource " tp " with " id " was deleted"))
+    (h req)))
 
-(defn- check-latest-version [cl]
+;; TODO: fixme
+(defn- check-latest-version [cfg cl]
   (println "check-latest-version " cl)
-  (let [[_ cl-] (cs/split cl (re-pattern (env/env :fhirplace-web-url)))]
+  (let [[_ cl-] (cs/split cl (re-pattern (:base cfg)))]
     (let [[_ tp id _ vid] (cs/split cl- #"/")]
       (println "check-latest " tp " " id " " vid)
-      (db/-latest? tp id vid))))
+      (fp/call* :fhir_is_latest_resource (cfg-str cfg) tp id vid) )))
 
-(defn ->latest-version! [h]
-  (fn [{{tp :type id :id} :params :as req}]
-    (println "->latest-version!")
-    (if-let [cl (get-in req [:headers "content-location"])]
-      (if (check-latest-version cl)
-        (h req)
-        (outcome 412 "Updating not last version of resource"
-                 {:severity "fatal"
-                  :details (str "Not last version")}))
+(defmw ->latest-version! h
+  [{{cl "content-location"} :headers cfg :cfg :as req}]
+  (cond
+    (not cl) (outcome :no-version-info "Provide 'Content-Location' header for update resource")
+    (not (check-latest-version cfg cl)) (outcome :not-last-version "Updating not last version of resource")
+    :else (h req)))
 
-      (outcome 401 "Provide 'Content-Location' header for update resource"
-               {:severity "fatal"
-                :details (str "No 'Content-Location' header")}))))
+(defmw ->check-tags h
+  [{tags :tags :as req}]
+  (if (seq tags)
+    (h req)
+    (outcome :no-tags "Expected not empty tags (i.e. Category header)")))
 
-(def uuid-regexp
-  #"[0-f]{8}-([0-f]{4}-){3}[0-f]{12}")
 
-(defn =metadata [req]
-  {:body (db/-conformance)})
+;; ACTIONS
 
-(defn =profile [{{tp :type} :params :as req}]
-  {:body (db/-profile tp)})
+(defn respond [bd]
+  {:body bd})
 
-(defn html-layout [content]
-  (html5
-    {:lang "en"}
-    [:head
-     [:title "fhirbase"]
-     (include-css "//netdna.bootstrapcdn.com/twitter-bootstrap/2.3.1/css/bootstrap-combined.min.css")
-     (include-css "//maxcdn.bootstrapcdn.com/font-awesome/4.2.0/css/font-awesome.min.css")
-     (include-css "/face.css")
-     [:body
-      [:div.wrap content]
-      (include-js "/face.js")
-      ]]))
+(defn =metadata [{cfg :cfg :as req}]
+  (-> (fp/call* :fhir_conformance (cfg-str cfg))
+      f/parse
+      rur/response))
 
-(defn html-face [req]
-  (-> (response
-        (html-layout
-          [:div
-           [:h1.top
-            [:span {:class "icon logo"}  "L"]
-            "fhirplace "
-            ]
-           [:div.ann
-            [:a {:href "https://github.com/fhirbase/fhirplace"} "Open Source " [:big.fa.fa-github]]
-            " FHIR server backed by "
-            [:a {:href "https://github.com/fhirbase/fhirbase"} "fhirbase"]]
-           [:div.bot
-            [:h2 "Applications:"]
-            [:hr]
-            [:h4
-             [:a {:href "/fhirface/index.html"}
-              [:big.fa.fa-star]
-              " fhirface"]
-             [:small "  generic fhir client"]]
-            [:hr]
-            [:h4
-             [:a {:href "/regi/index.html"}
-              [:big.fa.fa-star]
-              " regi"]
-             [:small "  sample application"]]]
-           ]))
-      (content-type "text/html; charset=UTF-8")
-      (status 200)))
+(defn =profile [{{tp :type} :params cfg :cfg}]
+  (-> (fp/call* :fhir_profile (cfg-str cfg) tp)
+      f/parse
+      rur/response))
 
-(defn =search-all [req]
-  #_(throw (Exception. "search-all not implemented"))
-  (html-face req))
+(defn =html-face [req]
+  (-> (fv/html-face {:plugins (fpl/read-plugins)})
+      (rur/response)
+      (rur/content-type "text/html; charset=UTF-8")
+      (rur/status 200)))
 
-(defn =search [{{rt :type :as param} :params :as req}]
-  (println "QUERY-STRING: " (:query-string req))
-  (let [query (or (:query-string req) "")]
-    {:body (db/-search rt query)}))
+(defn =search [{{tp :type} :params cfg :cfg q :query-string}]
+  (-> (fp/call* :fhir_search (cfg-str cfg) tp (or q ""))
+      f/parse
+      rur/response))
 
-(defn =tags-all [_]
-  {:body (db/-tags)})
+(defn =tags-all [{cfg :cfg}]
+  (-> (fp/call* :fhir_tags (cfg-str cfg))
+      rur/response))
 
-(defn =resource-type-tags [{{rt :type} :params}]
-  {:body (db/-tags rt)})
+(defn =resource-type-tags [{{rt :type} :params cfg :cfg}]
+  (-> (fp/call* :fhir_tags (cfg-str cfg) rt)
+      rur/response))
 
-(defn =resource-tags [{{rt :type id :id} :params}]
-  {:body (db/-tags rt id)})
+(defn =resource-tags [{{rt :type id :id} :params cfg :cfg}]
+  (-> (fp/call* :fhir_tags (cfg-str cfg) rt id)
+      rur/response))
 
-(defn =resource-version-tags [{{rt :type id :id vid :vid} :params}]
-  {:body (db/-tags rt id vid)})
+(defn =resource-version-tags [{{rt :type id :id vid :vid} :params cfg :cfg}]
+  (-> (fp/call* :fhir_tags (cfg-str cfg) rt id vid)
+      rur/response))
 
-(defn ->check-tags [h]
-  (fn [{tags :tags :as req}]
-    (if (seq tags)
-      (h req)
-      (outcome 422 "Tags"
-               {:severity "fatal"
-                :details (str "Expected not empty tags (i.e. Category header)")}))) )
+(defn =affix-resource-tags [{{tp :type id :id} :params tags :tags cfg :cfg}]
+  (fp/call* :fhir_affix_tags (cfg-str cfg) tp id (json/write-str tags)   )
+  (-> (fp/call* :fhir_tags (cfg-str cfg) tp id)
+      rur/response))
 
-;;TODO make as middle ware
-(defn =affix-resource-tags [{{rt :type id :id} :params tags :tags}]
-  (db/-affix-tags rt id tags)
-  {:body (db/-tags rt id)})
+(defn =affix-resource-version-tags [{{tp :type id :id vid :vid} :params tags :tags cfg :cfg}]
+  (fp/call* :fhir_affix_tags (cfg-str cfg) tp id vid (json/write-str tags)   )
+  (-> (fp/call* :fhir_tags (cfg-str cfg) tp id vid)
+      rur/response))
 
-(defn =affix-resource-version-tags [{{rt :type id :id vid :vid} :params tags :tags}]
-  (db/-affix-tags rt id vid tags)
-  {:body (db/-tags rt id vid)})
+(defn =remove-resource-tags [{{tp :type id :id} :params cfg :cfg}]
+  (-> (fp/call* :fhir_remove_tags (cfg-str cfg) tp id)
+      (str " tags was removed")
+      rur/response))
 
-(defn =remove-resource-tags [{{rt :type id :id} :params}]
-  (let [num (db/-remove-tags rt id)]
-    {:body (str num " tags was removed")}))
+(defn =remove-resource-version-tags [{{tp :type id :id vid :vid} :params cfg :cfg}]
+  (-> (fp/call* :fhir_remove_tags (cfg-str cfg) tp id vid)
+      (str " tags was removed")
+      rur/response))
 
-(defn =remove-resource-version-tags [{{rt :type id :id vid :vid} :params}]
-  (let [num (db/-remove-tags rt id vid)]
-    {:body (str num " tags was removed")}))
+(defn =history [{{tp :type id :id} :params cfg :cfg}]
+  (-> (fp/call* :fhir_history (cfg-str cfg) tp id "{}")
+      f/parse
+      rur/response))
 
-(defn =history [{{rt :type id :id} :params}]
-  {:body (db/-history rt id)})
+(defn =history-type [{{tp :type} :params cfg :cfg}]
+  (-> (fp/call* :fhir_history (cfg-str cfg) tp "{}")
+      f/parse
+      rur/response))
 
-(defn =history-type [{{rt :type} :params}]
-  {:body (db/-history rt)})
-
-(defn =history-all [_]
-  {:body (db/-history)})
+(defn =history-all [{cfg :cfg}]
+  (-> (fp/call* :fhir_history (cfg-str cfg) "{}")
+      f/parse
+      rur/response))
 
 (defn resource-resp [res]
   (let [bundle (json/read-str res :key-fn keyword)
@@ -338,41 +220,42 @@
         tags (:category entry)
         last-modified (:updated entry)
         fhir-res (f/parse (json/write-str (:content entry)))]
+
     (-> {:body fhir-res}
-        (header "Location" loc)
-        (header "Content-Location" loc)
-        (header "Category" (fc/encode-tags tags))
-        (header "Last-Modified" last-modified))))
+        (rur/header "Location" loc)
+        (rur/header "Content-Location" loc)
+        (rur/header "Category" (fc/encode-tags tags))
+        (rur/header "Last-Modified" last-modified))))
 
 (defn =create
-  [{{rt :type} :params res :data tags :tags :as req}]
+  [{{rt :type} :params res :data tags :tags cfg :cfg :as req}]
   {:pre [(not (nil? res))]}
   (println "=create " (keys req))
   (let [json (f/serialize :json res)
         jtags (json/write-str tags)
         resource-type (str (.getResourceType res))]
     (if (= rt resource-type)
-      (let [item (db/-create resource-type json jtags)]
-        (-> (resource-resp item)
-            (status 201)
-            (header "Category" (fc/encode-tags tags))))
+      (-> (fp/call* :fhir_create (cfg-str cfg) resource-type json jtags)
+          (resource-resp)
+          (rur/status 201)
+          (rur/header "Category" (fc/encode-tags tags)))
       (throw (Exception. (str "Wrong resource type '" resource-type "' for '" rt "' endpoint"))))))
 
 (defn =update
-  [{{rt :type id :id} :params res :data tags :tags :as req}]
+  [{{rt :type id :id} :params res :data tags :tags cfg :cfg :as req}]
   {:pre [(not (nil? res))]}
   (let [json (f/serialize :json res)
         jtags (json/write-str tags)
         resource-type (str (.getResourceType res))]
     (if (= rt resource-type)
       (let [cl (get-in req [:headers "content-location"])
-            item (db/-update rt id cl json jtags)]
+            item (fp/call* :fhir_update (cfg-str cfg) rt id cl json jtags)]
         (-> (resource-resp item)
-            (status 200)))
+            (rur/status 200)))
       (throw (Exception. (str "Wrong resource type '" resource-type "' for '" rt "' endpoint"))))))
 
 (defn- validate-resource-type
-  [rt res]
+  [cfg rt res]
   (let [json (f/serialize :json res)
         resource-type (str (.getResourceType res))]
     (if (= rt resource-type)
@@ -380,34 +263,62 @@
       (throw (Exception. (str "Wrong resource type '" resource-type "' for '" rt "' endpoint"))))))
 
 (defn =validate-create
-  [{{rt :type} :params res :data tags :tags}]
+  [{{rt :type} :params res :data tags :tags cfg :cfg}]
   #_{:pre [(not (nil? res))]}
-  (validate-resource-type rt res))
+  (validate-resource-type cfg rt res))
 
 (defn =validate-update
-  [{{rt :type} :params res :data}]
+  [{{rt :type} :params res :data cfg :cfg}]
   #_{:pre [(not (nil? res))]}
-  (validate-resource-type rt res))
+  (validate-resource-type cfg rt res))
 
 (defn =delete
-  [{{rt :type id :id} :params body :body}]
-  (-> (response (str (db/-delete rt id)))
-      (status 204)))
+  [{{rt :type id :id} :params body :body cfg :cfg}]
+  (-> (fp/call* :fhir_delete (cfg-str cfg) rt id)
+      (str)
+      (rur/response)
+      (rur/status 204)))
 
-;;TODO add checks
-(defn =read [{{rt :type id :id} :params}]
-  (let [res (db/-read rt id)]
-    (-> (resource-resp res)
-        (status 200))))
+(defn =read [{{rt :type id :id} :params cfg :cfg}]
+  (-> (fp/call* :fhir_read (cfg-str cfg) rt id)
+      (resource-resp)
+      (rur/status 200)))
 
-(defn =vread [{{rt :type id :id vid :vid} :params}]
-  (let [res (db/-vread rt (str id "/_history/" vid))]
-    (println res)
-    (-> (resource-resp res)
-        (status 200))))
+(defn =vread [{{rt :type id :id vid :vid} :params cfg :cfg}]
+  (-> (fp/call* :fhir_vread (cfg-str cfg) rt (str id "/_history/" vid))
+      (resource-resp)
+      (rur/status 200)))
 
 (defn =transaction
-  [{bd :body :as req}]
+  [{bd :body cfg :cfg :as req}]
   (let [bundle (f/parse (slurp bd))
         json (f/serialize :json bundle)]
-    {:body (db/-transaction json)}))
+    (-> (fp/call* :fhir_transaction (cfg-str cfg) json)
+        (f/parse)
+        (rur/response))))
+;; api
+
+(defn =list-apps [req]
+  (-> (fpl/read-plugins)
+      (json/write-str)
+      (rur/response)))
+
+(defn =upload-app [{form :multipart-params :as req}]
+  (let [tmpfile (get-in form ["file" :tempfile])
+        plugin-name (get form "app")
+        res (fpl/upload plugin-name tmpfile)]
+    (if (= (:exit res) 0)
+      (-> (fpl/read-plugin plugin-name)
+          (json/write-str)
+          (rur/response))
+      {:status 500
+       :body (pr-str res)})))
+
+(defn =rm-app [{{nm :app} :params :as req}]
+  (let [res (fpl/rm nm)]
+    (if (= (:exit res) 0)
+      (-> {:status "removed" :name nm :message (str "app [" nm "] successfully removed")}
+          (json/write-str)
+          (rur/response))
+      {:status 500
+       :body (pr-str res)})))

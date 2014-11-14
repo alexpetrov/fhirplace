@@ -1,6 +1,6 @@
 (ns fhir.operation-outcome-test
   (:require
-    [midje.sweet :refer :all]
+    [clojure.test :refer :all]
     [fhir.conv :as fc]
     [fhir.operation-outcome :as fo]))
 
@@ -12,6 +12,6 @@
                   {:severity "fatal"
                    :details "Problem one"}]}))
 
-(fact
-  "bundle"
-  (fc/to-xml (fc/from-xml (fc/to-xml o))) =not=> nil)
+(deftest outcome-test
+  (is (not= (fc/to-xml (fc/from-xml (fc/to-xml o)))
+            nil)))

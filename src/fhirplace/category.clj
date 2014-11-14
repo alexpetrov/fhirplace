@@ -34,29 +34,50 @@
 ;    use a charset value other than 'ISO-8859-1' or 'UTF-8'.
 
 
-
-(defn parse-pairs
+(defn parse-pair
   "should parse [key = value]"
   [x]
-  (let [[k v] (cs/split x #"\s?=\s?\"")]
-    [(keyword (cs/trim k)) (cs/replace (cs/trim v) #"\"$" "")]))
+  (let [[k v] (cs/split x #"\s?=\s?")]
+    [(keyword (cs/trim k))
+     (-> (cs/trim v)
+         (cs/replace  #"(^\"|\"$)" ""))]))
+
+(defn parse-tag [x]
+  (->> (cs/split (str "term=" x) #";")
+       ;;        ^ small hack :)
+       (map cs/trim)
+       (mapv parse-pair)
+       (into {})))
 
 (defn parse [x]
   (->> (cs/split x #",")
-       (mapv (fn [t]
-               (let [tt (cs/split t #";")
-                     term (cs/trim (first tt))
-                     pairs (into {:term term} (map parse-pairs (rest tt)))]
-                 pairs)))))
+       (map cs/trim)
+       (mapv parse-tag)))
 
-(defn safe-parse [x]
-  (try
-    (parse x)
-    (catch Exception e
-      (println "WARN: Tags could not be parsed: \n" x "\n" e)
-      [])))
+(defn- safe-parse [x]
+  (try (parse x)
+       (catch Exception e
+         (println "WARN: Tags could not be parsed: \n" x "\n" e)
+         [])))
+
+(defn- kv-to-str [k v] (str k "=\"" v "\""))
+
+(defn encode-tag [tag]
+  (->> (for [k [:label :scheme] :when (k tag)]
+         (kv-to-str (name k) (get tag k)))
+       (into [(:term tag)])
+       (cs/join "; ")))
 
 (defn encode-tags [tags]
   (println "TAGS--" tags)
-  (cs/join ", " (map (fn [t]
-                       (str (:term t) "; scheme=\"" (:scheme t) "\"; label=\"" (:label t) "\"")) tags)))
+  (->> tags
+       (map encode-tag)
+       (cs/join ", ")))
+
+(defn ->parse-tags!
+  "parse tags and assoc them as :tags key"
+  [h]
+  (fn [{{cat "category"} :headers :as req}]
+    (println "->parse-tags!")
+    (h (assoc req :tags (safe-parse cat)))))
+

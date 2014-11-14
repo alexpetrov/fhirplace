@@ -1,6 +1,8 @@
 # fhirplace
 
-FHIR server implementation
+[![Build Status](https://travis-ci.org/fhirbase/fhirplace.svg)](https://travis-ci.org/fhirbase/fhirplace)
+
+FHIR server implementation backed by fhirbase
 
 ## Installation
 

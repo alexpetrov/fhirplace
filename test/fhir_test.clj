@@ -1,15 +1,19 @@
 (ns fhir-test
   (:require
-    [midje.sweet :refer :all]
+    [clojure.test :refer :all]
     [fhir :as f]))
 
+
 (def x (slurp "test/fixtures/patient.xml"))
-(f/parse x)
-(f/serialize :xml (f/parse x))
-(f/errors (f/parse x))
-
 (def jx (slurp "test/fixtures/patient.json"))
-(f/parse jx)
 
-(fact "test conformance"
-  (f/conformance) =not=> nil)
+(deftest conformance-test
+  (is (not= (f/conformance) nil))
+
+  (is (instance? org.hl7.fhir.instance.model.Patient
+                 (f/parse jx)))
+  (is (instance? org.hl7.fhir.instance.model.Patient
+                 (f/parse x)))
+  (is (= (f/errors (f/parse x)) nil))
+
+  (is (instance? String (f/serialize :xml (f/parse x)))))

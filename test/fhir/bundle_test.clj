@@ -1,11 +1,10 @@
 (ns fhir.bundle-test
   (:require
-    [midje.sweet :refer :all]
+    [clojure.test :refer :all]
     [fhir.conv :as fc]
     [fhir.bundle :as fb]))
 
-(defn slurp-res [pth]
-  (fc/from-xml (slurp pth)))
+(defn slurp-res [pth] (fc/from-xml (slurp pth)))
 
 (def b (fb/bundle
          {:resourceType "Bundle"
@@ -16,6 +15,13 @@
                    :id "blah"
                    :content (slurp-res "test/fixtures/patient.xml")}]}))
 
-(fact
-  "bundle"
-  (fc/to-xml (fc/from-xml (fc/to-xml b))) =not=> nil)
+(deftest test-enc-dec
+  (is (not=
+        (-> (fc/to-xml b)
+                fc/from-xml
+                fc/to-xml)
+        (-> (fc/to-xml b)
+                fc/from-xml
+                fc/to-xml
+                fc/from-xml
+                fc/to-xml))))

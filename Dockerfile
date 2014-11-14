@@ -21,11 +21,11 @@ RUN sudo apt-get install -qq -y tmux zsh
 RUN cd ~/ && git clone https://github.com/niquola/dotfiles
 RUN cd ~/dotfiles && bash install.sh
 
-sudo apt-get install emacs24
-git clone https://github.com/flyingmachine/emacs-for-clojure.git ~/.emacs.d
+RUN curl https://raw.githubusercontent.com/creationix/nvm/v0.16.0/install.sh | bash
+RUN bash -lc 'source ~/.nvm/nvm.sh && nvm install 0.10'
 
-RUN cd ~/ && git clone https://github.com/fhirbase/fhirplace.git
-RUN cd ~/fhirplace && git pull origin master && echo 'v0.0.0'
+COPY . /home/fhir/fhirplace
+RUN sudo chown -R fhir:fhir /home/fhir/fhirplace
 RUN cd ~/fhirplace && git submodule init && git submodule update
 RUN cd ~/fhirplace && lein deps
 RUN cd ~/fhirplace && cp lein-env.tpl .lein-env && lein javac
@@ -35,9 +35,6 @@ RUN sudo ln -s ~/fhirplace/resources/public/app /app
 
 RUN sudo apt-get -qqy install nginx
 RUN sudo cp ~/fhirplace/nginx.conf /etc/nginx/sites-available/default
-
-RUN curl https://raw.githubusercontent.com/creationix/nvm/v0.16.0/install.sh | bash
-RUN bash -lc 'source ~/.nvm/nvm.sh && nvm install 0.10 && cd ~/fhirplace/fhirface && nvm use 0.10 && npm install && `npm bin`/bower install && `npm bin`/grunt build'
 
 EXPOSE 80
 

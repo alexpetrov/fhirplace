@@ -1,15 +1,18 @@
 (ns fhir.conv-test
   (:require
-    [midje.sweet :refer :all]
+    [clojure.test :refer :all]
     [fhir.conv :as f]))
 
 (def json-str (slurp "test/fixtures/patient.json"))
 (def xml-str  (slurp "test/fixtures/patient.xml"))
 
-(fact from-string
-      (str (class (f/from-json json-str))) => "class org.hl7.fhir.instance.model.Patient"
-      (str (class (f/from-xml xml-str))) => "class org.hl7.fhir.instance.model.Patient"
-      ; (f/to-json (f/from-json (f/to-json (f/from-json json-str)))) => (f/to-json (f/from-json json-str))
-      ; (f/to-xml (f/from-xml (f/to-xml (f/from-xml xml-str)))) => (f/to-xml (f/from-xml xml-str))
-      ; (-> json-str f/from-json f/to-json) => (-> xml-str f/from-xml f/to-json)
-      )
+(import org.hl7.fhir.instance.model.Patient)
+
+(deftest conv-test
+
+  (is
+    (instance?  org.hl7.fhir.instance.model.Patient
+               (f/from-json json-str)))
+  (is
+    (instance?  org.hl7.fhir.instance.model.Patient
+               (f/from-xml xml-str))))
